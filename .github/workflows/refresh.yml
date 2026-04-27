@@ -1,0 +1,42 @@
+name: Refresh F&O snapshot
+
+on:
+  schedule:
+    # 11:00 UTC = 16:30 IST — ~30 min after NSE close (3:30 PM IST).
+    # Mon-Fri only. cron is in UTC.
+    - cron: '0 11 * * 1-5'
+  workflow_dispatch:  # allow manual runs from the Actions tab
+
+permissions:
+  contents: write   # needed to push the updated snapshot.json
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch snapshot
+        run: python scripts/fetch_fno_snapshot.py
+
+      - name: Commit if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [[ -n "$(git status --porcelain snapshot.json)" ]]; then
+            git add snapshot.json
+            git commit -m "Refresh snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push
+          else
+            echo "No changes to snapshot."
+          fi
