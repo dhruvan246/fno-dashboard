@@ -1,5 +1,9 @@
 """Fetch a snapshot of all NSE F&O tickers from Yahoo Finance and write snapshot.json.
 
+The F&O constituent list is pulled live from NSE on every run, so additions and
+removals (April reviews etc.) are picked up automatically. If NSE is unreachable,
+falls back to scripts/fno_tickers.py.
+
 Usage:  python scripts/fetch_fno_snapshot.py
 Writes: snapshot.json at repo root (one level up from scripts/).
 """
@@ -11,15 +15,40 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import yfinance as yf
 import pandas as pd
+import urllib.request
+import urllib.error
 
 SCRIPT_DIR = Path(__file__).parent
-sys.path.insert(0, str(SCRIPT_DIR))
-from fno_tickers import FNO_TICKERS
-
 REPO_ROOT = SCRIPT_DIR.parent
 OUT_FILE = REPO_ROOT / "snapshot.json"
 
-YF_SYMBOLS = [t + ".NS" for t in FNO_TICKERS]
+NSE_URL = "https://www.nseindia.com/api/underlying-information"
+NSE_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def get_fno_symbols():
+    """Pull the live F&O list from NSE. Fall back to the static list on failure."""
+    try:
+        req = urllib.request.Request(NSE_URL, headers=NSE_HEADERS)
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read())
+        symbols = sorted({row["symbol"] for row in data["data"]["UnderlyingList"]})
+        if not symbols:
+            raise ValueError("Empty UnderlyingList from NSE")
+        print(f"Fetched {len(symbols)} F&O symbols live from NSE.", file=sys.stderr)
+        return symbols
+    except (urllib.error.URLError, json.JSONDecodeError, KeyError, ValueError) as e:
+        print(f"NSE fetch failed ({e}); falling back to scripts/fno_tickers.py", file=sys.stderr)
+        sys.path.insert(0, str(SCRIPT_DIR))
+        from fno_tickers import FNO_TICKERS
+        return list(FNO_TICKERS)
 
 
 def pct(curr, ref):
@@ -36,10 +65,10 @@ def nearest_idx_at_or_before(index, target):
     return int(pos) if pos >= 0 else None
 
 
-def fetch_prices_and_returns():
-    print(f"Downloading {len(YF_SYMBOLS)} tickers in one batch...", file=sys.stderr)
+def fetch_prices_and_returns(yf_symbols):
+    print(f"Downloading {len(yf_symbols)} tickers in one batch...", file=sys.stderr)
     data = yf.download(
-        YF_SYMBOLS,
+        yf_symbols,
         period="14mo",
         interval="1d",
         group_by="ticker",
@@ -54,7 +83,7 @@ def fetch_prices_and_returns():
     target_1y = today - pd.DateOffset(years=1)
 
     rows = []
-    for sym in YF_SYMBOLS:
+    for sym in yf_symbols:
         try:
             df = data[sym].dropna(how="all")
         except KeyError:
@@ -108,10 +137,14 @@ def fetch_market_caps(rows):
 
 
 def main():
-    rows = fetch_prices_and_returns()
+    symbols = get_fno_symbols()
+    yf_symbols = [s + ".NS" for s in symbols]
+
+    rows = fetch_prices_and_returns(yf_symbols)
     fetch_market_caps(rows)
     out = {
         "fetched_at": dt.datetime.utcnow().isoformat() + "Z",
+        "source": "NSE underlying-information API + Yahoo Finance",
         "rows": rows,
     }
     OUT_FILE.write_text(json.dumps(out, separators=(",", ":")))
