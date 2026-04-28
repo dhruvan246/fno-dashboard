@@ -2,9 +2,12 @@ name: Refresh F&O snapshot
 
 on:
   schedule:
-    # Once a day, weekdays only.
-    # 11:00 UTC = 16:30 IST — ~60 min after NSE close (15:30 IST), so Yahoo has settled.
-    - cron: '0 11 * * 1-5'
+    # All times in UTC (IST = UTC + 5:30).
+    # Market hours: 09:15 - 15:30 IST (= 03:45 - 10:00 UTC), Mon-Fri.
+    - cron: '45 3 * * 1-5'        # 09:15 IST  - market open
+    - cron: '*/15 4-9 * * 1-5'    # 09:30 - 15:45 IST every 15 min
+    - cron: '0 10 * * 1-5'        # 15:30 IST  - market close
+    - cron: '0 11 * * 1-5'        # 16:30 IST  - final settlement capture
   workflow_dispatch:
 
 permissions:
