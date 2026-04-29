@@ -24,19 +24,12 @@
     border-bottom: 1px solid #e5e7eb;
     background: #fafbfc;
   }
-  h1 {
-    margin: 0;
-    font-size: 20px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-  }
-  .meta {
-    color: #6b7280;
-    font-size: 12px;
-  }
+  h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+  .meta { color: #6b7280; font-size: 12px; }
   .toolbar {
     display: flex;
-    gap: 10px;
+    flex-wrap: wrap;
+    gap: 14px;
     align-items: center;
     padding: 10px 20px;
     background: #fff;
@@ -46,8 +39,7 @@
     z-index: 10;
   }
   #search {
-    flex: 1;
-    max-width: 280px;
+    flex: 0 0 240px;
     padding: 7px 10px;
     border: 1px solid #d1d5db;
     border-radius: 6px;
@@ -55,6 +47,32 @@
     outline: none;
   }
   #search:focus { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
+  .range-controls { display: flex; gap: 6px; align-items: center; font-size: 12px; color: #4b5563; }
+  .range-controls input[type="date"] {
+    padding: 6px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: inherit;
+  }
+  .range-controls .quick {
+    padding: 4px 9px;
+    background: #f3f4f6;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .range-controls .quick:hover { background: #e5e7eb; }
+  .range-controls .clear {
+    padding: 4px 9px;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 4px;
+    color: #b91c1c;
+    font-size: 11px;
+    cursor: pointer;
+  }
   .pill {
     background: #eef2ff;
     color: #3730a3;
@@ -89,6 +107,8 @@
   thead th:hover { background: #f3f4f6; color: #111827; }
   thead th .arrow { display: inline-block; width: 10px; opacity: 0.4; margin-left: 3px; }
   thead th.sorted .arrow { opacity: 1; color: #2563eb; }
+  thead th.range-col { background: #fef9c3; color: #713f12; }
+  thead th.range-col.sorted { background: #fef08a; }
   tbody td {
     padding: 7px 10px;
     border-bottom: 1px solid #f3f4f6;
@@ -96,7 +116,9 @@
     white-space: nowrap;
   }
   tbody td:first-child { text-align: left; font-weight: 600; color: #111827; }
-  tbody tr:hover { background: #f9fafb; }
+  tbody td.range-col { background: #fefce8; }
+  tbody tr:hover td { background: #f9fafb; }
+  tbody tr:hover td.range-col { background: #fef9c3; }
   .pos { color: #047857; }
   .neg { color: #b91c1c; }
   .zero { color: #6b7280; }
@@ -109,12 +131,9 @@
     font-size: 11px;
     border-top: 1px solid #f3f4f6;
   }
-  .loading, .error {
-    padding: 40px 20px;
-    text-align: center;
-    color: #6b7280;
-  }
+  .loading, .error { padding: 40px 20px; text-align: center; color: #6b7280; }
   .error { color: #b91c1c; }
+  .hidden { display: none; }
 </style>
 </head>
 <body>
@@ -130,6 +149,18 @@
 
 <div class="toolbar">
   <input id="search" type="search" placeholder="Filter by symbol&hellip;" disabled />
+  <div class="range-controls">
+    <span><b>Range:</b></span>
+    <input type="date" id="range-from" disabled />
+    <span>to</span>
+    <input type="date" id="range-to" disabled />
+    <button class="quick" data-days="7">1W</button>
+    <button class="quick" data-days="30">1M</button>
+    <button class="quick" data-days="90">3M</button>
+    <button class="quick" data-days="180">6M</button>
+    <button class="quick" data-days="365">1Y</button>
+    <button class="clear" id="range-clear">Clear</button>
+  </div>
   <span class="meta" id="filter-info"></span>
 </div>
 
@@ -140,6 +171,7 @@
       <th data-key="s" data-type="str">Symbol<span class="arrow"></span></th>
       <th data-key="p" data-type="num">Price (&#8377;)<span class="arrow"></span></th>
       <th data-key="m" data-type="num">M-Cap (&#8377; Cr)<span class="arrow"></span></th>
+      <th data-key="r" data-type="num" class="range-col hidden">Range %<span class="arrow"></span></th>
       <th data-key="d1" data-type="num">1D %<span class="arrow"></span></th>
       <th data-key="w1" data-type="num">1W %<span class="arrow"></span></th>
       <th data-key="m1" data-type="num">1M %<span class="arrow"></span></th>
@@ -148,7 +180,7 @@
     </tr>
   </thead>
   <tbody id="body">
-    <tr><td colspan="8" class="loading">Loading snapshot&hellip;</td></tr>
+    <tr><td colspan="9" class="loading">Loading snapshot&hellip;</td></tr>
   </tbody>
 </table>
 </div>
@@ -184,98 +216,49 @@ function fmt52wHigh(v) {
 
 let SNAP = null;
 let rows = [];
+let dates = [];           // canonical trading days
 let sortKey = 'd1';
 let sortDir = 'desc';
 let sortType = 'num';
+let rangeFrom = null;     // ISO YYYY-MM-DD
+let rangeTo = null;
+let rangeFromIdx = null;  // index into dates[]
+let rangeToIdx = null;
+let rangeFromDateActual = null;  // actual trading day used (snap)
+let rangeToDateActual = null;
 
-function compare(a, b) {
-  const av = a[sortKey], bv = b[sortKey];
-  if (av == null && bv == null) return 0;
-  if (av == null) return 1;
-  if (bv == null) return -1;
-  if (sortType === 'str') {
-    const r = av.localeCompare(bv);
-    return sortDir === 'asc' ? r : -r;
+function findIdxAtOrBefore(d) {
+  // Binary search: largest i such that dates[i] <= d
+  let lo = 0, hi = dates.length - 1, ans = -1;
+  while (lo <= hi) {
+    const m = (lo + hi) >> 1;
+    if (dates[m] <= d) { ans = m; lo = m + 1; } else { hi = m - 1; }
   }
-  return sortDir === 'asc' ? av - bv : bv - av;
+  return ans;
+}
+function findIdxAtOrAfter(d) {
+  let lo = 0, hi = dates.length - 1, ans = -1;
+  while (lo <= hi) {
+    const m = (lo + hi) >> 1;
+    if (dates[m] >= d) { ans = m; hi = m - 1; } else { lo = m + 1; }
+  }
+  return ans;
 }
 
-function render() {
-  const filter = document.getElementById('search').value.trim().toUpperCase();
-  let data = rows.slice();
-  if (filter) data = data.filter(r => r.s.includes(filter));
-  data.sort(compare);
-
-  const body = document.getElementById('body');
-  body.innerHTML = data.map(r => `<tr>
-    <td>${r.s}</td>
-    <td>${fmtPrice(r.p)}</td>
-    <td>${fmtMcap(r.m)}</td>
-    <td>${fmtPct(r.d1)}</td>
-    <td>${fmtPct(r.w1)}</td>
-    <td>${fmtPct(r.m1)}</td>
-    <td>${fmtPct(r.y1)}</td>
-    <td>${fmt52wHigh(r.h)}</td>
-  </tr>`).join('');
-
-  document.getElementById('count-pill').textContent = `${data.length} stocks`;
-  document.getElementById('filter-info').textContent = filter
-    ? `(filtered from ${rows.length})`
-    : '';
-  document.querySelectorAll('thead th').forEach(th => {
-    th.classList.toggle('sorted', th.dataset.key === sortKey);
-    const arrow = th.querySelector('.arrow');
-    arrow.textContent = th.dataset.key === sortKey
-      ? (sortDir === 'asc' ? '▲' : '▼')
-      : '↕';
-  });
-}
-
-document.querySelectorAll('thead th').forEach(th => {
-  th.addEventListener('click', () => {
-    const key = th.dataset.key;
-    const type = th.dataset.type || 'num';
-    if (sortKey === key) {
-      sortDir = sortDir === 'asc' ? 'desc' : 'asc';
-    } else {
-      sortKey = key;
-      sortType = type;
-      sortDir = type === 'str' ? 'asc' : 'desc';
-    }
-    render();
-  });
-});
-
-document.getElementById('search').addEventListener('input', render);
-
-// Add a cache-buster so the freshly committed JSON is picked up immediately.
-fetch('snapshot.json?t=' + Date.now())
-  .then(r => {
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    return r.json();
-  })
-  .then(snap => {
-    SNAP = snap;
-    rows = snap.rows.slice();
-    const fetched = new Date(snap.fetched_at);
-    const fetchedStr = fetched.toLocaleString('en-IN', {
-      dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata'
-    });
-    document.getElementById('meta').textContent =
-      `Snapshot from Yahoo Finance · ${fetchedStr} IST`;
-    document.getElementById('search').disabled = false;
-    document.getElementById('footer').innerHTML =
-      `Market caps in &#8377; crores. Returns are based on daily close. ` +
-      `52-week high computed from last ~252 trading days. ` +
-      `Click any column header to sort; click again to toggle direction. ` +
-      `Auto-refreshed daily by GitHub Actions after Indian market close.`;
-    render();
-  })
-  .catch(err => {
-    document.getElementById('body').innerHTML =
-      `<tr><td colspan="8" class="error">Failed to load snapshot.json — ${err.message}</td></tr>`;
-    document.getElementById('meta').textContent = 'Error loading data';
-  });
-</script>
-</body>
-</html>
+function recomputeRange() {
+  if (!rangeFrom || !rangeTo) {
+    rangeFromIdx = rangeToIdx = null;
+    return;
+  }
+  rangeFromIdx = findIdxAtOrAfter(rangeFrom);   // start: first trading day on/after picked date
+  rangeToIdx   = findIdxAtOrBefore(rangeTo);    // end:   last trading day on/before picked date
+  rangeFromDateActual = rangeFromIdx >= 0 ? dates[rangeFromIdx] : null;
+  rangeToDateActual   = rangeToIdx   >= 0 ? dates[rangeToIdx]   : null;
+  if (rangeFromIdx == null || rangeToIdx == null || rangeFromIdx > rangeToIdx) {
+    rangeFromIdx = rangeToIdx = null;
+  }
+  // Compute r for each row
+  for (const row of rows) {
+    if (rangeFromIdx == null) { row.r = null; continue; }
+    const sc = row.c[rangeFromIdx];
+    const ec = row.c[ra
