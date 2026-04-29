@@ -4,7 +4,7 @@ Output schema:
   {
     "fetched_at": "<UTC ISO>",
     "source": "...",
-    "trading_days": ["YYYY-MM-DD", ... ~252 entries],
+    "trading_days": ["YYYY-MM-DD", ...  ~252 entries],
     "rows": [
       {"s": "RELIANCE", "p": 1339.0, "d1": ..., "w1": ..., "m1": ..., "y1": ...,
        "h": ..., "m": <mcap_cr>, "c": [<close per trading_day>, null if missing]},
@@ -17,16 +17,13 @@ The dashboard uses this for arbitrary date-range return calculations.
 
 Usage:  python scripts/fetch_fno_snapshot.py
 """
-import json
-import sys
-import datetime as dt
+import json, sys, datetime as dt
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import urllib.request, urllib.error
 
 import yfinance as yf
 import pandas as pd
-import urllib.request
-import urllib.error
 
 SCRIPT_DIR = Path(__file__).parent
 REPO_ROOT = SCRIPT_DIR.parent
@@ -34,19 +31,15 @@ OUT_FILE = REPO_ROOT / "snapshot.json"
 
 NSE_URL = "https://www.nseindia.com/api/underlying-information"
 NSE_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept": "application/json",
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-HISTORY_DAYS = 252  # ~1 year of trading days
+HISTORY_DAYS = 252
 
 
 def get_fno_symbols():
-    """Pull the live F&O list from NSE. Fall back to scripts/fno_tickers.py on failure."""
     try:
         req = urllib.request.Request(NSE_URL, headers=NSE_HEADERS)
         with urllib.request.urlopen(req, timeout=20) as resp:
@@ -114,4 +107,65 @@ def fetch_prices_and_returns(yf_symbols):
             "m1": pct(last_price, ref_price(target_1m)),
             "y1": pct(last_price, ref_price(target_1y)),
             "h":  pct(last_price, float(close.max())),
-     
+            "_dates":  [d.strftime("%Y-%m-%d") for d in close.index],
+            "_closes": [round(float(v), 2) for v in close.values],
+        })
+    return rows
+
+
+def fetch_market_caps(rows):
+    print(f"Fetching market caps for {len(rows)} tickers...", file=sys.stderr)
+
+    def get_mcap(sym):
+        try:
+            return sym, yf.Ticker(sym + ".NS").fast_info.market_cap
+        except Exception:
+            return sym, None
+
+    by_sym = {r["s"]: r for r in rows}
+    with ThreadPoolExecutor(max_workers=30) as ex:
+        for fut in as_completed([ex.submit(get_mcap, r["s"]) for r in rows]):
+            sym, mcap = fut.result()
+            if sym in by_sym:
+                by_sym[sym]["m"] = round(mcap / 1e7, 0) if mcap else None
+
+
+def align_to_canonical_dates(rows):
+    """Build a canonical trading_days array (longest history) and align each
+    ticker's closes to it (insert null where the ticker has no data)."""
+    canonical_dates = max((r["_dates"] for r in rows), key=len, default=[])
+    date_index = {d: i for i, d in enumerate(canonical_dates)}
+    n = len(canonical_dates)
+    out_rows = []
+    for r in rows:
+        closes = [None] * n
+        for d, c in zip(r["_dates"], r["_closes"]):
+            idx = date_index.get(d)
+            if idx is not None:
+                closes[idx] = c
+        out = {k: v for k, v in r.items() if not k.startswith("_")}
+        out["c"] = closes
+        out_rows.append(out)
+    return canonical_dates, out_rows
+
+
+def main():
+    symbols = get_fno_symbols()
+    yf_symbols = [s + ".NS" for s in symbols]
+
+    rows = fetch_prices_and_returns(yf_symbols)
+    fetch_market_caps(rows)
+    canonical_dates, rows_out = align_to_canonical_dates(rows)
+
+    out = {
+        "fetched_at": dt.datetime.utcnow().isoformat() + "Z",
+        "source": "NSE underlying-information API + Yahoo Finance",
+        "trading_days": canonical_dates,
+        "rows": rows_out,
+    }
+    OUT_FILE.write_text(json.dumps(out, separators=(",", ":")))
+    print(f"Wrote {OUT_FILE} with {len(rows_out)} rows × {len(canonical_dates)} trading days.", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()
