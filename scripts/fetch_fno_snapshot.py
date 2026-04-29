@@ -1,11 +1,21 @@
 """Fetch a snapshot of all NSE F&O tickers from Yahoo Finance and write snapshot.json.
 
-The F&O constituent list is pulled live from NSE on every run, so additions and
-removals (April reviews etc.) are picked up automatically. If NSE is unreachable,
-falls back to scripts/fno_tickers.py.
+Output schema:
+  {
+    "fetched_at": "<UTC ISO>",
+    "source": "...",
+    "trading_days": ["YYYY-MM-DD", ... ~252 entries],
+    "rows": [
+      {"s": "RELIANCE", "p": 1339.0, "d1": ..., "w1": ..., "m1": ..., "y1": ...,
+       "h": ..., "m": <mcap_cr>, "c": [<close per trading_day>, null if missing]},
+      ...
+    ]
+  }
+
+The trading_days array is shared; per-ticker `c` array is parallel to it.
+The dashboard uses this for arbitrary date-range return calculations.
 
 Usage:  python scripts/fetch_fno_snapshot.py
-Writes: snapshot.json at repo root (one level up from scripts/).
 """
 import json
 import sys
@@ -32,9 +42,11 @@ NSE_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+HISTORY_DAYS = 252  # ~1 year of trading days
+
 
 def get_fno_symbols():
-    """Pull the live F&O list from NSE. Fall back to the static list on failure."""
+    """Pull the live F&O list from NSE. Fall back to scripts/fno_tickers.py on failure."""
     try:
         req = urllib.request.Request(NSE_URL, headers=NSE_HEADERS)
         with urllib.request.urlopen(req, timeout=20) as resp:
@@ -60,21 +72,11 @@ def pct(curr, ref):
         return None
 
 
-def nearest_idx_at_or_before(index, target):
-    pos = index.searchsorted(target, side="right") - 1
-    return int(pos) if pos >= 0 else None
-
-
 def fetch_prices_and_returns(yf_symbols):
-    print(f"Downloading {len(yf_symbols)} tickers in one batch...", file=sys.stderr)
+    print(f"Downloading {len(yf_symbols)} tickers (with daily history)...", file=sys.stderr)
     data = yf.download(
-        yf_symbols,
-        period="14mo",
-        interval="1d",
-        group_by="ticker",
-        auto_adjust=False,
-        progress=False,
-        threads=True,
+        yf_symbols, period="14mo", interval="1d",
+        group_by="ticker", auto_adjust=False, progress=False, threads=True,
     )
 
     today = pd.Timestamp.utcnow().tz_localize(None).normalize()
@@ -95,16 +97,14 @@ def fetch_prices_and_returns(yf_symbols):
             continue
         if close.index.tz is not None:
             close.index = close.index.tz_localize(None)
+        close = close.iloc[-HISTORY_DAYS:]
 
         last_price = float(close.iloc[-1])
         prev_close = float(close.iloc[-2]) if len(close) >= 2 else None
 
         def ref_price(target):
-            pos = nearest_idx_at_or_before(close.index, target)
-            return float(close.iloc[pos]) if pos is not None else None
-
-        last_252 = close.iloc[-252:]
-        hi_52w = float(last_252.max())
+            pos = close.index.searchsorted(target, side="right") - 1
+            return float(close.iloc[pos]) if pos >= 0 else None
 
         rows.append({
             "s": sym.replace(".NS", ""),
@@ -113,43 +113,5 @@ def fetch_prices_and_returns(yf_symbols):
             "w1": pct(last_price, ref_price(target_1w)),
             "m1": pct(last_price, ref_price(target_1m)),
             "y1": pct(last_price, ref_price(target_1y)),
-            "h": pct(last_price, hi_52w),
-        })
-    return rows
-
-
-def fetch_market_caps(rows):
-    print(f"Fetching market caps for {len(rows)} tickers...", file=sys.stderr)
-
-    def get_mcap(sym):
-        try:
-            return sym, yf.Ticker(sym + ".NS").fast_info.market_cap
-        except Exception:
-            return sym, None
-
-    by_sym = {r["s"]: r for r in rows}
-    with ThreadPoolExecutor(max_workers=30) as ex:
-        for fut in as_completed([ex.submit(get_mcap, r["s"]) for r in rows]):
-            sym, mcap = fut.result()
-            if sym in by_sym:
-                # store in crores (1 cr = 1e7), rounded
-                by_sym[sym]["m"] = round(mcap / 1e7, 0) if mcap else None
-
-
-def main():
-    symbols = get_fno_symbols()
-    yf_symbols = [s + ".NS" for s in symbols]
-
-    rows = fetch_prices_and_returns(yf_symbols)
-    fetch_market_caps(rows)
-    out = {
-        "fetched_at": dt.datetime.utcnow().isoformat() + "Z",
-        "source": "NSE underlying-information API + Yahoo Finance",
-        "rows": rows,
-    }
-    OUT_FILE.write_text(json.dumps(out, separators=(",", ":")))
-    print(f"Wrote {OUT_FILE} with {len(rows)} rows.", file=sys.stderr)
-
-
-if __name__ == "__main__":
-    main()
+            "h":  pct(last_price, float(close.max())),
+     
