@@ -36,7 +36,7 @@ NSE_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-HISTORY_DAYS = 1260   # ~5 years of trading days
+HISTORY_DAYS = 2530   # ~10 years of trading days
 
 
 def get_fno_symbols():
@@ -68,7 +68,7 @@ def pct(curr, ref):
 def fetch_prices_and_returns(yf_symbols):
     print(f"Downloading {len(yf_symbols)} tickers (with daily history)...", file=sys.stderr)
     data = yf.download(
-        yf_symbols, period="5y", interval="1d",
+        yf_symbols, period="10y", interval="1d",
         group_by="ticker", auto_adjust=False, progress=False, threads=True,
     )
 
