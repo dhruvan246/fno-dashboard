@@ -10,15 +10,23 @@
   body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #1a1a1a; background: #ffffff; font-size: 13px; }
   .header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 16px 20px 12px; border-bottom: 1px solid #e5e7eb; background: #fafbfc; }
   h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+  h2 { margin: 0 0 10px 0; font-size: 15px; font-weight: 600; color: #1a1a1a; }
   .meta { color: #6b7280; font-size: 12px; }
+  .tabs { display: flex; gap: 0; padding: 0 20px; background: #fff; border-bottom: 1px solid #e5e7eb; }
+  .tab { padding: 10px 16px; background: none; border: none; border-bottom: 2px solid transparent; font-size: 13px; font-weight: 500; color: #6b7280; cursor: pointer; }
+  .tab.active { color: #2563eb; border-bottom-color: #2563eb; }
+  .tab:hover { color: #111827; }
   .toolbar { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 10px 20px; background: #fff; border-bottom: 1px solid #e5e7eb; position: sticky; top: 0; z-index: 10; }
   #search { flex: 0 0 240px; padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; outline: none; }
   #search:focus { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
   .range-controls { display: flex; gap: 6px; align-items: center; font-size: 12px; color: #4b5563; flex-wrap: wrap; }
-  .range-controls input[type="date"] { padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; font-family: inherit; }
+  .range-controls input[type="date"], .range-controls input[type="number"] { padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; font-family: inherit; }
+  .range-controls input[type="number"] { width: 60px; }
   .range-controls .quick { padding: 4px 9px; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 4px; font-size: 11px; cursor: pointer; }
   .range-controls .quick:hover { background: #e5e7eb; }
   .range-controls .clear { padding: 4px 9px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 4px; color: #b91c1c; font-size: 11px; cursor: pointer; }
+  .range-controls .run { padding: 6px 14px; background: #2563eb; border: 1px solid #2563eb; border-radius: 6px; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .range-controls .run:hover { background: #1d4ed8; }
   .pill { background: #eef2ff; color: #3730a3; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 500; }
   .table-wrap { padding: 0 20px 20px; }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
@@ -44,6 +52,26 @@
   .loading, .error { padding: 40px 20px; text-align: center; color: #6b7280; }
   .error { color: #b91c1c; }
   .hidden { display: none; }
+
+  /* Backtest panel */
+  .backtest { padding: 16px 20px; background: #fefefe; }
+  .bt-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 14px 16px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 12px; color: #4b5563; }
+  .bt-form label { display: inline-flex; gap: 6px; align-items: center; }
+  .bt-form b { color: #111827; }
+  .bt-results { margin-top: 16px; }
+  .bt-summary { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  .bt-metric { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 16px; min-width: 160px; }
+  .bt-metric .bt-label { font-size: 11px; text-transform: uppercase; color: #6b7280; letter-spacing: 0.04em; font-weight: 600; }
+  .bt-metric .bt-value { font-size: 22px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .bt-metric.headline { background: #eef2ff; border-color: #c7d2fe; }
+  .bt-table-wrap { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+  .bt-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 12px; }
+  .bt-table th, .bt-table td { padding: 8px 12px; text-align: right; border-bottom: 1px solid #f3f4f6; white-space: nowrap; }
+  .bt-table th { background: #f9fafb; font-size: 11px; text-transform: uppercase; color: #4b5563; letter-spacing: 0.04em; font-weight: 600; }
+  .bt-table th:first-child, .bt-table td:first-child { text-align: left; }
+  .bt-table th:nth-child(2), .bt-table td:nth-child(2) { text-align: left; font-weight: 600; }
+  .bt-table tr:last-child td { border-bottom: none; }
+  .bt-error { padding: 14px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; color: #b91c1c; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -55,43 +83,63 @@
   <div><span class="pill" id="count-pill">…</span></div>
 </div>
 
-<div class="toolbar">
-  <input id="search" type="search" placeholder="Filter by symbol&hellip;" disabled />
-  <div class="range-controls">
-    <span><b>Range:</b></span>
-    <input type="date" id="range-from" disabled />
-    <span>to</span>
-    <input type="date" id="range-to" disabled />
-    <button class="quick" data-days="7">1W</button>
-    <button class="quick" data-days="30">1M</button>
-    <button class="quick" data-days="90">3M</button>
-    <button class="quick" data-days="180">6M</button>
-    <button class="quick" data-days="365">1Y</button>
-    <button class="clear" id="range-clear">Clear</button>
+<div class="tabs">
+  <button class="tab active" data-view="dashboard">Dashboard</button>
+  <button class="tab" data-view="backtest">Backtest</button>
+</div>
+
+<!-- DASHBOARD VIEW -->
+<div id="view-dashboard">
+  <div class="toolbar">
+    <input id="search" type="search" placeholder="Filter by symbol&hellip;" disabled />
+    <div class="range-controls">
+      <span><b>Range:</b></span>
+      <input type="date" id="range-from" disabled />
+      <span>to</span>
+      <input type="date" id="range-to" disabled />
+      <button class="quick" data-days="7">1W</button>
+      <button class="quick" data-days="30">1M</button>
+      <button class="quick" data-days="90">3M</button>
+      <button class="quick" data-days="180">6M</button>
+      <button class="quick" data-days="365">1Y</button>
+      <button class="clear" id="range-clear">Clear</button>
+    </div>
+    <span class="meta" id="filter-info"></span>
   </div>
-  <span class="meta" id="filter-info"></span>
+
+  <div class="table-wrap">
+  <table id="grid">
+    <thead>
+      <tr>
+        <th data-key="s" data-type="str">Symbol<span class="arrow"></span></th>
+        <th data-key="p" data-type="num">Price (&#8377;)<span class="arrow"></span></th>
+        <th data-key="m" data-type="num">M-Cap (&#8377; Cr)<span class="arrow"></span></th>
+        <th data-key="r" data-type="num" class="range-col hidden">Range %<span class="arrow"></span></th>
+        <th data-key="d1" data-type="num">1D %<span class="arrow"></span></th>
+        <th data-key="w1" data-type="num">1W %<span class="arrow"></span></th>
+        <th data-key="m1" data-type="num">1M %<span class="arrow"></span></th>
+        <th data-key="y1" data-type="num">1Y %<span class="arrow"></span></th>
+        <th data-key="h" data-type="num">From 52W High %<span class="arrow"></span></th>
+      </tr>
+    </thead>
+    <tbody id="body"><tr><td colspan="9" class="loading">Loading snapshot&hellip;</td></tr></tbody>
+  </table>
+  </div>
+  <div class="footer" id="footer"></div>
 </div>
 
-<div class="table-wrap">
-<table id="grid">
-  <thead>
-    <tr>
-      <th data-key="s" data-type="str">Symbol<span class="arrow"></span></th>
-      <th data-key="p" data-type="num">Price (&#8377;)<span class="arrow"></span></th>
-      <th data-key="m" data-type="num">M-Cap (&#8377; Cr)<span class="arrow"></span></th>
-      <th data-key="r" data-type="num" class="range-col hidden">Range %<span class="arrow"></span></th>
-      <th data-key="d1" data-type="num">1D %<span class="arrow"></span></th>
-      <th data-key="w1" data-type="num">1W %<span class="arrow"></span></th>
-      <th data-key="m1" data-type="num">1M %<span class="arrow"></span></th>
-      <th data-key="y1" data-type="num">1Y %<span class="arrow"></span></th>
-      <th data-key="h" data-type="num">From 52W High %<span class="arrow"></span></th>
-    </tr>
-  </thead>
-  <tbody id="body"><tr><td colspan="9" class="loading">Loading snapshot&hellip;</td></tr></tbody>
-</table>
+<!-- BACKTEST VIEW -->
+<div id="view-backtest" class="backtest hidden">
+  <h2>Momentum backtest</h2>
+  <div class="bt-form">
+    <label><b>Rank stocks by returns from</b> <input type="date" id="bt-rank-from"></label>
+    <label><b>to</b> <input type="date" id="bt-rank-to"></label>
+    <label><b>Pick top</b> <input type="number" id="bt-top-n" value="10" min="1" max="50"></label>
+    <label><b>Buy equally on rank-end date, then hold until</b> <input type="date" id="bt-hold-to"></label>
+    <button class="run" id="bt-run">Run backtest</button>
+  </div>
+  <div id="bt-results" class="bt-results hidden"></div>
 </div>
-
-<div class="footer" id="footer"></div>
 
 <script>
 function fmtPrice(v) { if (v == null) return '<span class="na">—</span>'; return v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -111,6 +159,7 @@ function fmt52wHigh(v) {
   else if (v <= -30) cls = 'strong-neg';
   return `<span class="${cls}">${v > 0 ? '+' : ''}${v.toFixed(2)}%</span>`;
 }
+function fmtDate(d) { return new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }); }
 
 let SNAP = null, rows = [], dates = [];
 let sortKey = 'd1', sortDir = 'desc', sortType = 'num';
@@ -159,19 +208,15 @@ function render() {
   let data = rows.slice();
   if (filter) data = data.filter(r => r.s.includes(filter));
   data.sort(compare);
-
   const showRange = rangeFromIdx != null;
   document.querySelectorAll('.range-col').forEach(el => el.classList.toggle('hidden', !showRange));
   renderRows(data, showRange);
-
   document.getElementById('count-pill').textContent = `${data.length} stocks`;
   let info = filter ? `(filtered from ${rows.length})` : '';
   if (showRange && rangeFromDateActual && rangeToDateActual) {
-    const fmt = d => new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
-    info = `Range: ${fmt(rangeFromDateActual)} → ${fmt(rangeToDateActual)}` + (filter ? ` · ${info}` : '');
+    info = `Range: ${fmtDate(rangeFromDateActual)} → ${fmtDate(rangeToDateActual)}` + (filter ? ` · ${info}` : '');
   }
   document.getElementById('filter-info').textContent = info;
-
   document.querySelectorAll('thead th').forEach(th => {
     th.classList.toggle('sorted', th.dataset.key === sortKey);
     const arrow = th.querySelector('.arrow');
@@ -220,6 +265,128 @@ document.querySelectorAll('.quick').forEach(btn => {
   });
 });
 
+/* ----------------- TAB SWITCHING ----------------- */
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    const view = t.dataset.view;
+    document.getElementById('view-dashboard').classList.toggle('hidden', view !== 'dashboard');
+    document.getElementById('view-backtest').classList.toggle('hidden', view !== 'backtest');
+  });
+});
+
+/* ----------------- BACKTEST LOGIC ----------------- */
+function runBacktest() {
+  const rankFrom = document.getElementById('bt-rank-from').value;
+  const rankTo   = document.getElementById('bt-rank-to').value;
+  const holdTo   = document.getElementById('bt-hold-to').value;
+  const topN     = Math.max(1, parseInt(document.getElementById('bt-top-n').value, 10) || 10);
+  const out      = document.getElementById('bt-results');
+  out.classList.remove('hidden');
+
+  if (!rankFrom || !rankTo || !holdTo) {
+    out.innerHTML = `<div class="bt-error">Please fill in all three dates.</div>`;
+    return;
+  }
+  if (rankFrom >= rankTo) { out.innerHTML = `<div class="bt-error">Rank "from" must be before rank "to".</div>`; return; }
+  if (rankTo > holdTo)    { out.innerHTML = `<div class="bt-error">Hold-to date must be on or after rank-to date.</div>`; return; }
+
+  const rfIdx = findIdxAtOrAfter(rankFrom);
+  const rtIdx = findIdxAtOrBefore(rankTo);
+  const htIdx = findIdxAtOrBefore(holdTo);
+  if (rfIdx < 0 || rtIdx < 0 || htIdx < 0 || rfIdx >= rtIdx) {
+    out.innerHTML = `<div class="bt-error">No trading days in selected range. Pick dates between ${fmtDate(dates[0])} and ${fmtDate(dates[dates.length-1])}.</div>`;
+    return;
+  }
+  const rfDate = dates[rfIdx], rtDate = dates[rtIdx], htDate = dates[htIdx];
+
+  // Compute rank-window returns
+  const candidates = [];
+  for (const row of rows) {
+    const startC = row.c[rfIdx], buyC = row.c[rtIdx], sellC = row.c[htIdx];
+    if (startC && buyC) {
+      candidates.push({
+        s: row.s,
+        rankRet: (buyC / startC - 1) * 100,
+        buyC, sellC,
+        holdRet: (sellC && buyC) ? (sellC / buyC - 1) * 100 : null,
+      });
+    }
+  }
+  candidates.sort((a, b) => b.rankRet - a.rankRet);
+  const picks = candidates.slice(0, topN);
+  const validPicks = picks.filter(p => p.holdRet != null);
+
+  // Equal-weight portfolio return (avg of hold returns)
+  const portRet = validPicks.length
+    ? validPicks.reduce((s, p) => s + p.holdRet, 0) / validPicks.length
+    : null;
+
+  // Benchmark: all stocks equal-weight, hold same period
+  let benchSum = 0, benchN = 0;
+  for (const row of rows) {
+    const b = row.c[rtIdx], s = row.c[htIdx];
+    if (b && s) { benchSum += (s / b - 1) * 100; benchN++; }
+  }
+  const benchRet = benchN ? benchSum / benchN : null;
+  const alpha = (portRet != null && benchRet != null) ? portRet - benchRet : null;
+
+  // Holding period stats
+  const daysHeld = htIdx - rtIdx;
+  const yearsHeld = daysHeld / 252;
+  const annualized = (portRet != null && yearsHeld > 0)
+    ? (Math.pow(1 + portRet/100, 1/yearsHeld) - 1) * 100
+    : null;
+
+  const valFmt = v => v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(2)}%`;
+  const valCls = v => v == null ? 'na' : (v >= 0 ? 'pos' : 'neg');
+
+  out.innerHTML = `
+    <div class="bt-summary">
+      <div class="bt-metric headline">
+        <div class="bt-label">Portfolio return</div>
+        <div class="bt-value ${valCls(portRet)}">${valFmt(portRet)}</div>
+      </div>
+      <div class="bt-metric">
+        <div class="bt-label">Annualized (CAGR-ish)</div>
+        <div class="bt-value ${valCls(annualized)}">${valFmt(annualized)}</div>
+      </div>
+      <div class="bt-metric">
+        <div class="bt-label">Benchmark (all ${rows.length} eq-wt)</div>
+        <div class="bt-value ${valCls(benchRet)}">${valFmt(benchRet)}</div>
+      </div>
+      <div class="bt-metric">
+        <div class="bt-label">Alpha vs benchmark</div>
+        <div class="bt-value ${valCls(alpha)}">${valFmt(alpha)}</div>
+      </div>
+    </div>
+    <div style="margin: 8px 0 12px; font-size: 12px; color: #4b5563;">
+      Ranked over <b>${fmtDate(rfDate)} → ${fmtDate(rtDate)}</b> ·
+      Bought ${validPicks.length}/${picks.length} picks on <b>${fmtDate(rtDate)}</b> ·
+      Sold on <b>${fmtDate(htDate)}</b> (${daysHeld} trading days, ${yearsHeld.toFixed(2)} years)
+    </div>
+    <div class="bt-table-wrap">
+      <table class="bt-table">
+        <thead><tr><th>#</th><th>Symbol</th><th>Rank %</th><th>Buy ₹</th><th>Sell ₹</th><th>Hold %</th></tr></thead>
+        <tbody>
+          ${picks.map((p, i) => `
+            <tr>
+              <td>${i+1}</td>
+              <td>${p.s}</td>
+              <td>${fmtPct(+p.rankRet.toFixed(2))}</td>
+              <td>${p.buyC ? p.buyC.toLocaleString('en-IN', {minimumFractionDigits:2}) : '—'}</td>
+              <td>${p.sellC ? p.sellC.toLocaleString('en-IN', {minimumFractionDigits:2}) : '—'}</td>
+              <td>${p.holdRet != null ? fmtPct(+p.holdRet.toFixed(2)) : '<span class="na">—</span>'}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+document.getElementById('bt-run').addEventListener('click', runBacktest);
+
+/* ----------------- LOAD ----------------- */
 fetch('snapshot.json?t=' + Date.now())
   .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
   .then(snap => {
@@ -235,12 +402,20 @@ fetch('snapshot.json?t=' + Date.now())
     if (dates.length) {
       fromEl.min = toEl.min = dates[0];
       fromEl.max = toEl.max = dates[dates.length - 1];
+      // Backtest defaults
+      ['bt-rank-from', 'bt-rank-to', 'bt-hold-to'].forEach(id => {
+        const el = document.getElementById(id);
+        el.min = dates[0];
+        el.max = dates[dates.length - 1];
+      });
+      document.getElementById('bt-rank-from').value = '2023-03-31';
+      document.getElementById('bt-rank-to').value   = '2023-05-31';
+      document.getElementById('bt-hold-to').value   = '2024-09-30';
     }
     fromEl.disabled = toEl.disabled = false;
     document.getElementById('footer').innerHTML =
       `Pick a custom date range above (or use a quick button) to compute returns between any two dates. ` +
-      `Returns are based on daily closes; the dashboard snaps to the nearest trading day for weekends/holidays. ` +
-      `Click any column header to sort.`;
+      `Click any column header to sort. Switch to the <b>Backtest</b> tab to run momentum strategies.`;
     render();
   })
   .catch(err => {
