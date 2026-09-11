@@ -17,7 +17,7 @@ The dashboard uses this for arbitrary date-range return calculations.
 
 Usage:  python scripts/fetch_fno_snapshot.py
 """
-import json, sys, datetime as dt
+import json, os, sys, time, datetime as dt
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import urllib.request, urllib.error
@@ -38,22 +38,53 @@ NSE_HEADERS = {
 
 HISTORY_DAYS = 2530   # ~10 years of trading days
 
+# NSE read timeouts are transient, and the fno_tickers.py fallback is a DATED snapshot,
+# so the live source is worth retrying before we settle for a stale universe.
+NSE_TRIES = int(os.environ.get("NSE_TRIES", "3"))
+NSE_BACKOFF = (2, 5, 10)   # seconds between attempts
+
 
 def get_fno_symbols():
-    try:
-        req = urllib.request.Request(NSE_URL, headers=NSE_HEADERS)
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read())
-        symbols = sorted({row["symbol"] for row in data["data"]["UnderlyingList"]})
-        if not symbols:
-            raise ValueError("Empty UnderlyingList from NSE")
-        print(f"Fetched {len(symbols)} F&O symbols live from NSE.", file=sys.stderr)
-        return symbols
-    except (urllib.error.URLError, json.JSONDecodeError, KeyError, ValueError) as e:
-        print(f"NSE fetch failed ({e}); falling back to scripts/fno_tickers.py", file=sys.stderr)
-        sys.path.insert(0, str(SCRIPT_DIR))
-        from fno_tickers import FNO_TICKERS
-        return list(FNO_TICKERS)
+    """Live F&O universe from NSE, with a retry ladder and a stale-list fallback.
+
+    BOTH recorded failures of this workflow (runs 32929895087 on 2026-08-26 and 34612922924 on
+    2026-09-11 -- 2 of 2, out of 100 runs) were the same escape, and the fallback below was written
+    for exactly that case yet never fired. A READ timeout inside urlopen surfaces as a bare
+    TimeoutError: CPython's urllib.request.do_open wraps only the REQUEST phase into URLError
+    (`except OSError: raise URLError` guards h.request, while h.getresponse sits outside it), so
+    `except urllib.error.URLError` never matched and the run died with a traceback instead of
+    falling back. TimeoutError, ssl.SSLError and socket resets are all OSError subclasses, and
+    URLError is itself an OSError, so catching OSError closes the hole for every transport shape
+    at once without widening the intent.
+
+    A timeout is transient and fno_tickers.py is a dated snapshot (213 symbols, taken 2026-04-27),
+    so falling back is NOT free -- it silently prices a stale universe. Hence: retry the live
+    source first, and make the fallback say plainly that it is stale.
+    """
+    last = None
+    for attempt in range(1, NSE_TRIES + 1):
+        try:
+            req = urllib.request.Request(NSE_URL, headers=NSE_HEADERS)
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                data = json.loads(resp.read())
+            symbols = sorted({row["symbol"] for row in data["data"]["UnderlyingList"]})
+            if not symbols:
+                raise ValueError("Empty UnderlyingList from NSE")
+            print(f"Fetched {len(symbols)} F&O symbols live from NSE.", file=sys.stderr)
+            return symbols
+        except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
+            last = e
+            if attempt < NSE_TRIES:
+                wait = NSE_BACKOFF[min(attempt - 1, len(NSE_BACKOFF) - 1)]
+                print(f"NSE fetch failed ({type(e).__name__}: {e}) -- attempt {attempt}/{NSE_TRIES}, "
+                      f"retrying in {wait}s", file=sys.stderr)
+                time.sleep(wait)
+    print(f"NSE unreachable after {NSE_TRIES} attempts ({type(last).__name__}: {last}); falling back "
+          f"to scripts/fno_tickers.py -- a DATED snapshot, so the F&O universe may be stale.",
+          file=sys.stderr)
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from fno_tickers import FNO_TICKERS
+    return list(FNO_TICKERS)
 
 
 def pct(curr, ref):
